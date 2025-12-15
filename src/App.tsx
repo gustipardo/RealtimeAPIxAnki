@@ -74,7 +74,7 @@ function App() {
       const transport = new OpenAIRealtimeWebRTC({
         useInsecureApiKey: true,
         mediaStream: stream,
-        baseUrl: 'https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview'
+        baseUrl: 'https://api.openai.com/v1/realtime?model=gpt-realtime-mini'
       });
       const session = new RealtimeSession(agent, { transport });
       sessionRef.current = session;
@@ -82,7 +82,7 @@ function App() {
       setDebugInfo(prev => prev + '\nConnecting session (SDK)...');
       await session.connect({
         apiKey: apiKey,
-        model: 'gpt-4o-realtime-preview',
+        model: 'gpt-realtime-mini',
       });
       setDebugInfo(prev => prev + '\nSession connected!');
 
