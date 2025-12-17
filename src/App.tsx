@@ -3,6 +3,7 @@ import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC } from '@openai/ag
 import { Mic, MicOff, Loader2, Volume2, BookOpen, CheckCircle, XCircle } from 'lucide-react';
 import { AnkiService } from './services/AnkiService';
 import { AnkiDeckSelector } from './components/AnkiDeckSelector';
+import { AnkiStudySession } from './components/AnkiStudySession';
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -17,6 +18,8 @@ function App() {
   // Evaluation Badge State
   const [evaluation, setEvaluation] = useState<'correct' | 'incorrect' | null>(null);
   const toolCallNames = useRef<Record<string, string>>({}); // Map call_id -> function_name
+
+  const [manualStudyDeck, setManualStudyDeck] = useState<string | null>(null);
 
   useEffect(() => {
     const getDevices = async () => {
@@ -291,7 +294,14 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
       {/* Anki Connect Dashboard for Manual Verification */}
-      <AnkiDeckSelector />
+      {manualStudyDeck ? (
+        <AnkiStudySession
+          deckName={manualStudyDeck}
+          onExit={() => setManualStudyDeck(null)}
+        />
+      ) : (
+        <AnkiDeckSelector onStartStudy={setManualStudyDeck} />
+      )}
 
       {/* Badge Overlay */}
       {evaluation && (

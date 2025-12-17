@@ -82,6 +82,7 @@ export function AnkiStudySession({ deckName, initialCards = [], onExit }: AnkiSt
                 // Remove current card from queue
                 setQueue(prev => prev.slice(1));
                 setCurrentCard(null); // Triggers useEffect to load next
+                setIsLoading(false);
             } else {
                 setError("Failed to submit answer to Anki.");
                 setIsLoading(false);
