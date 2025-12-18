@@ -5,7 +5,7 @@ import { AnkiConnectService } from '../services/AnkiConnectService';
 
 /**
  * Hook to manage the OpenAI Realtime WebRTC Session.
- * Supports both Mock Mode (Demo) and Real Anki Mode (Conversational Study).
+ * Refactored for Atomic Turn & Semantic Check architecture.
  */
 export function useRealtimeSession() {
     const [isConnected, setIsConnected] = useState(false);
@@ -81,10 +81,15 @@ export function useRealtimeSession() {
 
             // 4. Default Greeting (if not skipped)
             if (!skipGreeting) {
+                // Ensure modalities are set correctly
                 session.transport.sendEvent({
-                    type: 'response.create',
-                    response: { instructions: 'Say hello to the user.' }
+                    type: 'session.update',
+                    session: {
+                        modalities: ["text", "audio"],
+                        instructions: 'Say hello to the user.'
+                    }
                 });
+                session.transport.sendEvent({ type: 'response.create' });
             }
 
             // 5. Event Listeners
@@ -107,8 +112,11 @@ export function useRealtimeSession() {
 
     const disconnect = useCallback(() => {
         if (sessionRef.current) {
-            // @ts-ignore
-            sessionRef.current.disconnect?.();
+            // Strict cleanup
+            try {
+                // @ts-ignore
+                sessionRef.current.disconnect?.();
+            } catch (e) { console.warn("Error calling disconnect on session", e); }
             sessionRef.current = null;
         }
         setIsConnected(false);
@@ -118,110 +126,11 @@ export function useRealtimeSession() {
         appendDebug('Disconnected.');
     }, []);
 
-    const startStudySession = useCallback(async (deckName?: string) => {
-        // Auto-connect if not connected
-        // Auto-connect if not connected (Skip greeting if so)
-        if (!sessionRef.current) {
-            appendDebug('Auto-connecting for study session...');
-            const success = await connect(true);
-            if (!success) {
-                appendDebug('Failed to auto-connect. Aborting study session.');
-                return;
-            }
-        }
-
-        setIsStudyMode(true);
-        activeDeckNameRef.current = deckName || null;
-        currentCardRef.current = null;
-        setCurrentCard(null);
-
-        let greeting = "";
-        let instructions = "";
-
-        if (deckName) {
-            // REAL ANKI MODE
-            try {
-                // Initialize queue
-                const dueCards = await realServiceRef.current.findDueCards(deckName);
-                realQueueRef.current = dueCards;
-                const count = dueCards.length;
-
-                const now = new Date();
-                const timeOfDay = now.getHours() < 12 ? 'morning' : 'afternoon';
-                greeting = `Good ${timeOfDay}! We are studying ${deckName} from your Anki collection. You have ${count} cards due.`;
-                instructions = `
-                    ROLE: You are an Anki Tutor.
-                    LANGUAGE: English ONLY.
-                    MODE: REAL ANKI.
-                    TASK:
-                    1. Call get_next_card.
-                    2. If null returned, say "Session Complete".
-                    3. Ask question based on Front.
-                    4. Evaluate answer matching Back.
-                    5. Call notify_evaluation(correct/incorrect).
-                    6. Say "Correct/Incorrect" and brief explanation.
-                    7. IMMEDIATELY call get_next_card. REPEAT LOOP.
-                `;
-            } catch (e: any) {
-                appendDebug(`Error init real session: ${e.message}`);
-                return;
-            }
-        } else {
-            // MOCK MODE
-            mockServiceRef.current.startSession();
-            const stats = mockServiceRef.current.getDeckStats();
-            greeting = `Hello! Starting demo study for ${stats.name}.`;
-            instructions = `
-                ROLE: You are an Anki Tutor (Demo Mode).
-                TASK: One-off questions.
-            `;
-        }
-
-        appendDebug(`Starting Study Session: ${greeting}`);
-
-        // Update System Prompt & Tools
-        sessionRef.current.transport.sendEvent({
-            type: 'session.update',
-            session: {
-                instructions: instructions,
-                tools: [
-                    {
-                        type: 'function',
-                        name: 'get_next_card',
-                        description: 'Get next card data (front/back). Returns null if deck empty.',
-                        parameters: { type: 'object', properties: {} }
-                    },
-                    {
-                        type: 'function',
-                        name: 'notify_evaluation',
-                        description: 'Notify UI and Anki of result.',
-                        parameters: {
-                            type: 'object',
-                            properties: { verdict: { type: 'string', enum: ['correct', 'incorrect'] } },
-                            required: ['verdict']
-                        }
-                    }
-                ],
-                tool_choice: 'auto'
-            }
-        });
-
-        // Trigger Start
-        sessionRef.current.transport.sendEvent({
-            type: 'conversation.item.create',
-            item: {
-                type: 'message',
-                role: 'user',
-                content: [{ type: 'input_text', text: `Start session. Greeting: ${greeting}. Fetch first card.` }]
-            }
-        });
-        sessionRef.current.transport.sendEvent({ type: 'response.create' });
-    }, []);
-
     // Helper to fetch next card based on mode
     const fetchNextCardInternal = async () => {
         if (activeDeckNameRef.current) {
             // Real Mode
+            console.log("Fetching next real card, queue size:", realQueueRef.current.length);
             if (realQueueRef.current.length === 0) return null;
 
             const nextId = realQueueRef.current[0];
@@ -260,6 +169,7 @@ export function useRealtimeSession() {
     const answerCardInternal = async (verdict: 'correct' | 'incorrect') => {
         if (activeDeckNameRef.current && currentCardRef.current) {
             // Real Answer
+            console.log(`Answering Real Card ${currentCardRef.current.cardId}: ${verdict}`);
             const ease = verdict === 'correct' ? 3 : 1;
             await realServiceRef.current.answerCard(currentCardRef.current.cardId, ease);
         } else {
@@ -267,6 +177,144 @@ export function useRealtimeSession() {
             console.log(`Mock Answer: ${verdict}`);
         }
     };
+
+    const startStudySession = useCallback(async (deckName?: string) => {
+        // Auto-connect if not connected (Skip greeting if so)
+        if (!sessionRef.current) {
+            appendDebug('Auto-connecting for study session...');
+            const success = await connect(true);
+            if (!success) {
+                appendDebug('Failed to auto-connect. Aborting study session.');
+                return;
+            }
+        }
+
+        setIsStudyMode(true);
+        activeDeckNameRef.current = deckName || null;
+        currentCardRef.current = null;
+        setCurrentCard(null);
+
+        // Initial Card Load
+        const firstCard = await fetchNextCardInternal();
+        const firstCardContent = firstCard ? {
+            front: firstCard.fields.Front.value,
+            back: firstCard.fields.Back.value
+        } : null;
+
+        let greeting = "";
+        let instructions = "";
+
+        if (deckName) {
+            // REAL ANKI MODE
+            try {
+                // Initialize queue logic handled in fetchNextCardInternal or setup here if needed?
+                // Logic already exists in realServiceRef usage, but we need to populate queue first!
+                // FIX: Initialize queue like before
+                const dueCards = await realServiceRef.current.findDueCards(deckName);
+                realQueueRef.current = dueCards;
+                const count = dueCards.length;
+
+                // Re-fetch first card now that queue is populated
+                // Because fetchNextCardInternal relies on realQueueRef
+                const actualFirstCard = await fetchNextCardInternal();
+                const actualFirstContent = actualFirstCard ? {
+                    front: actualFirstCard.fields.Front.value,
+                    back: actualFirstCard.fields.Back.value
+                } : null;
+
+                const now = new Date();
+                const timeOfDay = now.getHours() < 12 ? 'morning' : 'afternoon';
+                greeting = `Good ${timeOfDay}! We are studying ${deckName} from Anki. ${count} cards due.`;
+
+                // --- ATOMIC TURN SYSTEM PROMPT ---
+                instructions = `
+                    ROLE: You are an expert Anki Tutor. Language: English ONLY.
+
+                    CORE BEHAVIOR:
+                    1. START: Greet with "${greeting}".
+                       - IMMEDIATELY ask the question for the FIRST CARD provided in the initial user message.
+                       - REPHRASE the card front into a natural question. NEVER read it verbatim.
+                    
+                    2. LISTENING & EVALUATING:
+                       - Listen to user answer.
+                       - SEMANTIC CHECK: If the user lists items in a different order, IT IS CORRECT. If they use synonyms, IT IS CORRECT. Be lenient on phrasing, strict on facts.
+                       - DO NOT say "Evaluation answer" or "I am calling the tool". Just call it silently.
+
+                    3. TRANSITION (ATOMIC TURN):
+                       - Call \`evaluate_and_move_next(user_response_quality, feedback_text)\`.
+                       - This tool SUBMITS the grade and FETCHES the next card atomically.
+                       - The tool returns the NEXT card's front/back.
+                       - Speak the \`feedback_text\` briefly.
+                       - IMMEDIATELY ask the NEXT question based on the tool output.
+
+                    ERROR HANDLING:
+                    - If the user is silent, ask if they need a hint.
+                `;
+
+                // Prepare initial prompt content
+                var initialContent = `Session Started.
+                    First Card Front: "${actualFirstContent?.front || 'None'}"
+                    First Card Back: "${actualFirstContent?.back || 'None'}"
+                `;
+
+            } catch (e: any) {
+                appendDebug(`Error init real session: ${e.message}`);
+                return;
+            }
+        } else {
+            // MOCK MODE (Simplified)
+            mockServiceRef.current.startSession();
+            const stats = mockServiceRef.current.getDeckStats();
+            greeting = `Hello! Demo study for ${stats.name}.`;
+            instructions = `ROLE: Demo Tutor. Use evaluate_and_move_next.`;
+            var initialContent = "Start Demo.";
+        }
+
+        appendDebug(`Starting Study Session: ${greeting}`);
+
+        // Update System Prompt & Tools
+        sessionRef.current.transport.sendEvent({
+            type: 'session.update',
+            session: {
+                modalities: ["text", "audio"],
+                instructions: instructions,
+                tools: [
+                    {
+                        type: "function",
+                        name: "evaluate_and_move_next",
+                        description: "Evaluates the user's answer, updates the database, and retrieves the next card content.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                user_response_quality: {
+                                    type: "string",
+                                    enum: ["correct", "incorrect"],
+                                    description: "The verdict based on semantic meaning. 'A and B' equals 'B and A'."
+                                },
+                                feedback_text: {
+                                    type: "string",
+                                    description: "Short explanation of why it is correct or incorrect."
+                                }
+                            },
+                            required: ["user_response_quality", "feedback_text"]
+                        }
+                    }
+                ],
+                tool_choice: 'auto'
+            }
+        });
+
+        // Trigger Start
+        sessionRef.current.transport.sendEvent({
+            type: 'conversation.item.create',
+            item: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: initialContent }]
+            }
+        });
+        sessionRef.current.transport.sendEvent({ type: 'response.create' });
+    }, []);
 
     const handleTransportEvent = async (event: any) => {
         const session = sessionRef.current;
@@ -298,31 +346,41 @@ export function useRealtimeSession() {
             const name = toolCallNames.current[call_id];
             appendDebug(`[Tool Executing] ${name}`);
 
-            if (name === 'get_next_card') {
-                const result = await fetchNextCardInternal();
-                appendDebug(`[Tool Result] ${result ? 'Card Loaded' : 'End of Deck'}`);
-
-                session.transport.sendEvent({
-                    type: 'conversation.item.create',
-                    item: { type: 'function_call_output', call_id, output: JSON.stringify(result) }
-                });
-                session.transport.sendEvent({ type: 'response.create' });
-            }
-            else if (name === 'notify_evaluation') {
+            if (name === 'evaluate_and_move_next') {
                 try {
                     const args = JSON.parse(argsStr);
-                    const verdict = args.verdict;
-                    setEvaluation(verdict);
-                    appendDebug(`[Evaluation] ${verdict}`);
+                    const verdict = args.user_response_quality;
+                    const feedback = args.feedback_text;
 
-                    // Perform Logic (Write to Anki)
+                    appendDebug(`[Evaluation] ${verdict} - ${feedback}`);
+                    setEvaluation(verdict);
+
+                    // 1. Submit Answer
                     await answerCardInternal(verdict);
 
+                    // 2. Fetch Next Card
+                    const nextCard = await fetchNextCardInternal();
+                    const nextCardOutput = nextCard ? {
+                        front: nextCard.fields.Front.value,
+                        back: nextCard.fields.Back.value
+                    } : { front: "END OF SESSION", back: "END OF SESSION" };
+
+                    appendDebug(`[Tool Result] Next Card: ${nextCard ? 'Loaded' : 'End'}`);
+
+                    // 3. Return Result to AI
                     session.transport.sendEvent({
                         type: 'conversation.item.create',
-                        item: { type: 'function_call_output', call_id, output: JSON.stringify({ success: true }) }
+                        item: {
+                            type: 'function_call_output',
+                            call_id,
+                            output: JSON.stringify({
+                                status: "success",
+                                next_card: nextCardOutput
+                            })
+                        }
                     });
                     session.transport.sendEvent({ type: 'response.create' });
+
                 } catch (e) {
                     appendDebug(`Tool Error: ${e}`);
                 }
@@ -335,10 +393,10 @@ export function useRealtimeSession() {
         isConnecting,
         error,
         debugInfo,
-        setDebugInfo, // Exposed to allow clearing
+        setDebugInfo,
         evaluation,
         isStudyMode,
-        currentCard, // New: Exposed for Live Display
+        currentCard,
         connect,
         disconnect,
         startStudySession
