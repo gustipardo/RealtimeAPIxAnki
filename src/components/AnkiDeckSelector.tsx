@@ -7,9 +7,10 @@ const ankiService = new AnkiConnectService();
 
 export interface AnkiDeckSelectorProps {
     onStartStudy?: (deckName: string) => void;
+    onStartConversational?: (deckName: string) => void;
 }
 
-export function AnkiDeckSelector({ onStartStudy }: AnkiDeckSelectorProps) {
+export function AnkiDeckSelector({ onStartStudy, onStartConversational }: AnkiDeckSelectorProps) {
     const [isConnected, setIsConnected] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -180,7 +181,17 @@ export function AnkiDeckSelector({ onStartStudy }: AnkiDeckSelectorProps) {
                                             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
                                         >
                                             <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                                            <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
                                             Start Manual Study
+                                        </button>
+                                    )}
+                                    {onStartConversational && (
+                                        <button
+                                            onClick={() => onStartConversational(selectedDeck)}
+                                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                                        >
+                                            <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                                            Start Conversational Study
                                         </button>
                                     )}
                                     {isLoading && <Loader2 className="w-5 h-5 animate-spin text-blue-400" />}

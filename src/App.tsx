@@ -4,6 +4,7 @@ import { AnkiStudySession } from './components/AnkiStudySession';
 import { DebugPanel } from './components/ui/DebugPanel';
 import { StatusBadge } from './components/ui/StatusBadge';
 import { ConnectionCard } from './components/ui/ConnectionCard';
+import { LiveCardDisplay } from './components/ui/LiveCardDisplay';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import { useRealtimeSession } from './hooks/useRealtimeSession';
 
@@ -30,7 +31,8 @@ function App() {
     isStudyMode,
     connect,
     disconnect,
-    startStudySession
+    startStudySession,
+    currentCard
   } = useRealtimeSession();
 
   // 3. Local UI State for Manual Study Mode (Testing without AI)
@@ -56,10 +58,21 @@ function App() {
         */
         <>
           {/* Deck Selection & Manual Trigger */}
-          <AnkiDeckSelector onStartStudy={setManualStudyDeck} />
+          {!isStudyMode && (
+            <AnkiDeckSelector
+              onStartStudy={setManualStudyDeck}
+              onStartConversational={startStudySession}
+            />
+          )}
 
           {/* Evaluation Badge (Visual Feedback for AI Studio) */}
           <StatusBadge status={evaluation} />
+
+          {/* Live Card Display (Conversational Mode) */}
+          <LiveCardDisplay
+            card={currentCard}
+            isListening={isConnected && isStudyMode && !evaluation}
+          />
 
           {/* Main AI Interaction Card */}
           <ConnectionCard
