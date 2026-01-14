@@ -278,7 +278,12 @@ export function useRealtimeSession() {
                        c) THIRD: Ask the NEXT question by rephrasing next_card.front.
                        - If correct, say "Correct!", pause briefly, then ask the next question.
                        - NEVER skip revealing the answer on incorrect. NEVER rush to the next question.
-                       - "I DON'T KNOW" / "SKIP" / "PASS" -> Treat as INCORRECT. Reveal answer from answered_card_back.
+
+                    5. NO HINTS - STRICT RULE:
+                       - "I DON'T KNOW" / "SKIP" / "PASS" / "HINT" / "HELP" / "CAN YOU GIVE ME A HINT?" -> ALL treated as INCORRECT.
+                       - NEVER give hints. NEVER give clues. NEVER give partial answers.
+                       - If user asks for a hint: immediately call the tool with incorrect, reveal the answer, move on.
+                       - One attempt per card. No second chances.
 
                     FLOW:
                 `;
