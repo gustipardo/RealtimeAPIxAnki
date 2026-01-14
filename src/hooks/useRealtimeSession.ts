@@ -268,15 +268,17 @@ export function useRealtimeSession() {
                     3. TRANSITION (ATOMIC TURN):
                        - Call \`evaluate_and_move_next(user_response_quality, feedback_text)\`.
                        - This tool SUBMITS the grade and FETCHES the next card atomically.
-                       - The tool returns the NEXT card's front/back.
-                       - Speak the \`feedback_text\` briefly.
-                       - IMMEDIATELY ask the NEXT question based on the tool output.
+                       - The tool returns: { answered_card_back, next_card: { front, back } }.
+                       - \`answered_card_back\` = the correct answer for the card you JUST evaluated.
+                       - \`next_card\` = the NEXT card to ask.
 
-                    4. ANSWERING:
-                       - If user fails, you MUST say "Incorrect! The answer is [Back Content]." immediately.
-                       - Always start response with "Correct!" or "Incorrect!".
-                       - NO HINTS unless explicitly asked. If asked, give a subtle hint (definition/context), never the answer.
-                       - "I DON'T KNOW" / "SKIP" / "PASS" -> Treat as INCORRECT immediately. Reveal answer.
+                    4. AFTER TOOL RESPONSE - CRITICAL SEQUENCE:
+                       a) FIRST: If incorrect, say "Incorrect! The correct answer is [answered_card_back]." - use the EXACT value from the tool response.
+                       b) SECOND: Pause briefly (take a breath).
+                       c) THIRD: Ask the NEXT question by rephrasing next_card.front.
+                       - If correct, say "Correct!", pause briefly, then ask the next question.
+                       - NEVER skip revealing the answer on incorrect. NEVER rush to the next question.
+                       - "I DON'T KNOW" / "SKIP" / "PASS" -> Treat as INCORRECT. Reveal answer from answered_card_back.
 
                     FLOW:
                 `;
@@ -386,6 +388,9 @@ export function useRealtimeSession() {
                     appendDebug(`[Evaluation] ${verdict} - ${feedback}`);
                     setEvaluation(verdict);
 
+                    // 0. Capture current card's back BEFORE transitioning (for "correct answer" feedback)
+                    const answeredCardBack = currentCardRef.current?.fields?.Back?.value || null;
+
                     // 1. Submit Answer
                     await answerCardInternal(verdict);
 
@@ -406,6 +411,7 @@ export function useRealtimeSession() {
                             call_id,
                             output: JSON.stringify({
                                 status: "success",
+                                answered_card_back: answeredCardBack,
                                 next_card: nextCardOutput
                             })
                         }
