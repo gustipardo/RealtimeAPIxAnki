@@ -30,6 +30,7 @@ export function useRealtimeSession() {
     const activeDeckNameRef = useRef<string | null>(null); // If null -> Mock Mode
     const realQueueRef = useRef<number[]>([]);
     const currentCardRef = useRef<any | null>(null); // For tool access
+    const streamRef = useRef<MediaStream | null>(null); // For cleanup
 
     const appendDebug = (msg: string) => setDebugInfo(prev => prev + '\n' + msg);
 
@@ -52,7 +53,9 @@ export function useRealtimeSession() {
 
             // 1. Microphone Access
             appendDebug('Requesting microphone...');
+            appendDebug('Requesting microphone...');
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = stream;
             appendDebug('Microphone access granted.');
 
             // 2. Realtime Agent Setup
@@ -119,6 +122,14 @@ export function useRealtimeSession() {
             } catch (e) { console.warn("Error calling disconnect on session", e); }
             sessionRef.current = null;
         }
+
+        // Stop Microphone Stream
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+            appendDebug('Microphone stream stopped.');
+        }
+
         setIsConnected(false);
         setIsStudyMode(false);
         activeDeckNameRef.current = null;
@@ -189,8 +200,19 @@ export function useRealtimeSession() {
             }
         }
 
+        appendDebug(`startStudySession called with deckName: "${deckName}"`);
+
         setIsStudyMode(true);
-        activeDeckNameRef.current = deckName || null;
+        // If deckName is provided, use it. If not, check if we already have one active (re-entry).
+        // Only fallback to null (Mock) if explicitly intended or no state exists.
+        if (deckName) {
+            activeDeckNameRef.current = deckName;
+        } else if (!activeDeckNameRef.current) {
+            // No deck provided and no active deck? Warn or Default to Mock?
+            // For now, let's log this case.
+            appendDebug("No deckName provided. Falling back to Mock Mode (or previous deck if any).");
+        }
+
         currentCardRef.current = null;
         setCurrentCard(null);
 
@@ -204,13 +226,16 @@ export function useRealtimeSession() {
         let greeting = "";
         let instructions = "";
 
-        if (deckName) {
+        // Check against ref, as deckName arg might be undefined on re-entry
+        const currentDeck = activeDeckNameRef.current;
+
+        if (currentDeck) {
             // REAL ANKI MODE
             try {
                 // Initialize queue logic handled in fetchNextCardInternal or setup here if needed?
                 // Logic already exists in realServiceRef usage, but we need to populate queue first!
                 // FIX: Initialize queue like before
-                const dueCards = await realServiceRef.current.findDueCards(deckName);
+                const dueCards = await realServiceRef.current.findDueCards(currentDeck);
                 realQueueRef.current = dueCards;
                 const count = dueCards.length;
 
@@ -224,7 +249,7 @@ export function useRealtimeSession() {
 
                 const now = new Date();
                 const timeOfDay = now.getHours() < 12 ? 'morning' : 'afternoon';
-                greeting = `Good ${timeOfDay}! We are studying ${deckName} from Anki. ${count} cards due.`;
+                greeting = `Good ${timeOfDay}! We are studying ${currentDeck} from Anki. ${count} cards due.`;
 
                 // --- ATOMIC TURN SYSTEM PROMPT ---
                 instructions = `
@@ -247,8 +272,13 @@ export function useRealtimeSession() {
                        - Speak the \`feedback_text\` briefly.
                        - IMMEDIATELY ask the NEXT question based on the tool output.
 
-                    ERROR HANDLING:
-                    - If the user is silent, ask if they need a hint.
+                    4. ANSWERING:
+                       - If user fails, you MUST say "Incorrect! The answer is [Back Content]." immediately.
+                       - Always start response with "Correct!" or "Incorrect!".
+                       - NO HINTS unless explicitly asked. If asked, give a subtle hint (definition/context), never the answer.
+                       - "I DON'T KNOW" / "SKIP" / "PASS" -> Treat as INCORRECT immediately. Reveal answer.
+
+                    FLOW:
                 `;
 
                 // Prepare initial prompt content
@@ -278,6 +308,7 @@ export function useRealtimeSession() {
             session: {
                 modalities: ["text", "audio"],
                 instructions: instructions,
+                input_audio_transcription: { model: 'whisper-1' },
                 tools: [
                     {
                         type: "function",
